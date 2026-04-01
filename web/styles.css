@@ -16,9 +16,50 @@ header {
 }
 
 main {
-  max-width: 1000px;
+  max-width: 1360px;
   margin: 0 auto;
   padding: 20px;
+}
+
+.app-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 16px;
+  align-items: start;
+}
+
+.main-column {
+  min-width: 0;
+}
+
+.terminal-column {
+  position: sticky;
+  top: 16px;
+}
+
+.terminal-card {
+  padding-bottom: 10px;
+}
+
+.terminal-hint {
+  margin-top: 0;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.terminal-scroll {
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+#terminalLog {
+  min-height: 420px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .card {
@@ -161,4 +202,14 @@ pre {
 #tourStopsList li {
   margin-bottom: 8px;
   font-size: 14px;
+}
+
+@media (max-width: 1100px) {
+  .app-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-column {
+    position: static;
+  }
 }

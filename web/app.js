@@ -26,9 +26,15 @@ function el(id) {
   return document.getElementById(id);
 }
 
-function setJson(id, value) {
-  el(id).textContent = JSON.stringify(value, null, 2);
+function logTerminal(step, payload) {
+  const node = el("terminalLog");
+  const time = new Date().toLocaleTimeString();
+  const line = `[${time}] ${step}\n${typeof payload === "string" ? payload : JSON.stringify(payload, null, 2)}\n\n`;
+  node.textContent += line;
+  node.scrollTop = node.scrollHeight;
 }
+
+logTerminal("System", "Terminal started. Waiting for user actions...");
 
 function stopGenerateProgress() {
   if (generateProgressTimer) {
@@ -104,11 +110,9 @@ function parsePrompt(prompt) {
   else if (text.includes("3h") || text.includes("3 hour")) duration = "3h";
   else if (text.includes("1h") || text.includes("1 hour")) duration = "1h";
 
-  const categories = [];
-  if (text.includes("eatery") || text.includes("eateries") || text.includes("food")) categories.push("eatery");
-  if (text.includes("activity") || text.includes("activities")) categories.push("activity");
-  if (text.includes("place") || text.includes("landmark") || text.includes("sight")) categories.push("place");
-  if (!categories.length) categories.push("place", "activity", "eatery");
+  // Keep all categories available so curation can include multiple creators.
+  // Prompt wording (e.g. "focused on eateries") is reflected via interests.
+  const categories = ["place", "activity", "eatery"];
 
   const interests = [];
   if (text.includes("local")) interests.push("local");
@@ -150,6 +154,41 @@ function buildSplit(route, priceWei) {
     payouts: payoutRows,
     fairnessNote: "Shares are proportional to contribution percentages from the curated route.",
   };
+}
+
+async function logNpcSubmissions(city, route) {
+  try {
+    const res = await api(`/content?city=${encodeURIComponent(city)}&limit=100`);
+    const items = Array.isArray(res.items) ? res.items : [];
+    const byCreator = new Map();
+
+    for (const item of items) {
+      const key = String(item.creator_id || "").toLowerCase();
+      if (!key) continue;
+      if (!byCreator.has(key)) byCreator.set(key, []);
+      byCreator.get(key).push(item);
+    }
+
+    const creators = [...byCreator.entries()]
+      .sort((a, b) => b[1].length - a[1].length)
+      .slice(0, 2);
+
+    const selectedIds = new Set((route.stops || []).map((s) => s.contentItem.id));
+    const output = creators.map(([wallet, creatorItems], idx) => ({
+      npc: `NPC_${idx + 1}`,
+      wallet,
+      submissions: creatorItems.map((item) => ({
+        id: item.id,
+        title: item.title,
+        category: item.category,
+        tags: item.tags,
+        selectedInCuratedRoute: selectedIds.has(item.id),
+      })),
+    }));
+    logTerminal("NPC Submissions", output);
+  } catch (err) {
+    logTerminal("NPC Submissions", { error: "Failed to fetch NPC submissions", detail: err.message || String(err) });
+  }
 }
 
 function ensureMap() {
@@ -210,27 +249,24 @@ function renderTourVisual(route) {
 }
 
 el("connectBtn").onclick = async () => {
-  if (!window.ethereum) {
-    alert("No wallet detected. Install MetaMask.");
-    return;
-  }
-  const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-  currentWallet = accounts[0];
-  el("walletAddress").value = currentWallet;
-  el("authStatus").textContent = `Wallet connected: ${currentWallet}`;
-};
-
-el("loginBtn").onclick = async () => {
   try {
-    const walletAddress = el("walletAddress").value.trim();
-    if (!walletAddress) throw new Error("Enter wallet address");
+    if (!window.ethereum) throw new Error("No wallet detected. Install MetaMask.");
+
+    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+    const walletAddress = (accounts && accounts[0]) || el("walletAddress").value.trim();
+    if (!walletAddress) throw new Error("No wallet account returned");
     if (!window.ethereum) throw new Error("Wallet provider not found");
+    currentWallet = walletAddress;
+    el("walletAddress").value = currentWallet;
+    el("authStatus").textContent = `Wallet connected: ${currentWallet}. Signing in...`;
+    logTerminal("Auth", { status: "Wallet connected", walletAddress });
 
     const challengeRes = await api("/auth/challenge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ walletAddress }),
     });
+    logTerminal("Auth", { status: "Challenge received" });
 
     const signature = await window.ethereum.request({
       method: "personal_sign",
@@ -250,13 +286,16 @@ el("loginBtn").onclick = async () => {
     authToken = verifyRes.token;
     currentWallet = walletAddress;
     el("authStatus").textContent = "Authenticated";
+    logTerminal("Auth", { status: "Authenticated", walletAddress });
   } catch (err) {
     el("authStatus").textContent = `Auth failed: ${err.message}`;
+    logTerminal("Auth Error", err.message);
   }
 };
 
 el("generateRouteBtn").onclick = async () => {
   try {
+    logTerminal("Route", "Generating curated route...");
     startGenerateProgress();
     const prompt = el("tourPrompt").value.trim();
     if (!prompt) throw new Error("Prompt is required");
@@ -276,26 +315,41 @@ el("generateRouteBtn").onclick = async () => {
     latestRouteId = body.route.id;
     latestRoute = body.route;
     latestPrepare = null;
-    setJson("prepareResult", {});
-    setJson("confirmResult", {});
-    setJson("proofResult", {});
-    el("nextStepsWrap").classList.add("hidden");
-    renderTourVisual(body.route);
-    stopGenerateProgress();
-    setGenerateProgress(100, "Tour generated successfully.");
-    setJson("routeResult", {
+    logTerminal("Route", {
       prompt,
       parsedPreferences: parsed,
       route: body.route,
       note: "Curated from pre-submitted NPC creator content.",
     });
+    el("nextStepsWrap").classList.add("hidden");
+    renderTourVisual(body.route);
+    stopGenerateProgress();
+    setGenerateProgress(100, "Tour generated successfully.");
+    logNpcSubmissions(parsed.city, body.route);
+    logTerminal("Purchase Prep", { status: "Preparing purchase in background for faster wallet popup..." });
+    try {
+      const prep = await api(`/routes/${latestRouteId}/prepare-purchase`, { method: "POST" });
+      latestPrepare = prep;
+      logTerminal("Purchase Prep", {
+        status: "Purchase prepared. Buy button should open wallet quickly.",
+        ...prep,
+      });
+      if (latestRoute?.contributions) {
+        logTerminal("Revenue Split", buildSplit(latestRoute, prep.priceWei));
+      }
+    } catch (prepErr) {
+      logTerminal("Purchase Prep", {
+        warning: "Background prepare failed. Buy button will retry prepare.",
+        error: prepErr.message,
+      });
+    }
     setTimeout(() => {
       el("generateProgressWrap").classList.add("hidden");
     }, 700);
   } catch (err) {
     stopGenerateProgress();
     setGenerateProgress(100, "Generation failed.");
-    setJson("routeResult", { error: err.message });
+    logTerminal("Route Error", err.message);
   }
 };
 
@@ -311,14 +365,19 @@ el("buyNowBtn").onclick = async () => {
 
     let prep = latestPrepare;
     if (!prep || !prep.contractAddress || !prep.calldata) {
+      logTerminal("Purchase Prep", { status: "Preparing purchase now. This can take a bit..." });
       prep = await api(`/routes/${routeId}/prepare-purchase`, { method: "POST" });
       latestPrepare = prep;
-      setJson("prepareResult", prep);
+      logTerminal("Purchase Prep", prep);
       if (latestRoute?.contributions) {
-        setJson("splitResult", buildSplit(latestRoute, prep.priceWei));
+        logTerminal("Revenue Split", buildSplit(latestRoute, prep.priceWei));
       }
     }
 
+    logTerminal("Purchase", {
+      status: "Opening wallet confirmation...",
+      note: "If popup is delayed, keep this tab active for a few seconds.",
+    });
     const txHash = await window.ethereum.request({
       method: "eth_sendTransaction",
       params: [
@@ -339,14 +398,14 @@ el("buyNowBtn").onclick = async () => {
       body: JSON.stringify({ txHash }),
     });
 
-    setJson("confirmResult", {
+    logTerminal("Purchase", {
       txHash,
       purchase: confirmBody,
       note: "Purchase completed via connected wallet in one click.",
     });
     el("nextStepsWrap").classList.remove("hidden");
   } catch (err) {
-    setJson("confirmResult", { error: err.message });
+    logTerminal("Purchase Error", err.message);
   }
 };
 
@@ -372,8 +431,8 @@ el("storeProofBtn").onclick = async () => {
       }),
     });
 
-    setJson("proofResult", body);
+    logTerminal("Proof Upload", body);
   } catch (err) {
-    setJson("proofResult", { error: err.message });
+    logTerminal("Proof Upload Error", err.message);
   }
 };
