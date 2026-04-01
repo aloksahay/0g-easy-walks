@@ -54,6 +54,16 @@ Node.js/Express Backend
 - Content descriptions: uploaded as JSON blobs
 - Full route definitions: uploaded as JSON blobs
 
+### Why SQLite Still Exists
+
+`backend/data/easywalk.db` is an **index + operational state DB**, not the source of truth for media/content blobs.
+
+- **0G Storage is canonical for blobs**: photos, description payloads, and full route JSON.
+- **SQLite stores pointers + queryable metadata**: city/category/tags, creator relationships, contributions, and hash references (`photo_hashes`, `text_hash`, `route_hash`).
+- **SQLite also stores app state**: auth challenges, generated route rows, purchase rows, and cached/search-friendly records needed for fast API responses.
+
+This split is intentional: decentralized immutable storage for content, plus fast relational querying for product UX and purchase orchestration.
+
 ### Smart Contract (on-chain)
 
 - `routes[routeId]` → `{creators[], sharesBps[], priceWei, routeHash, active}`
@@ -172,6 +182,7 @@ GET  /api/v1/media/:rootHash         → proxy download from 0G Storage (cached)
 **Phase 5 — Purchase Flow**
 - `services/contract.ts` — ethers.js register/verify/calldata
 - `POST /routes/:id/prepare-purchase` and `confirm-purchase` endpoints
+- Fix: added missing `RouteRegistered` ABI event so prepare-purchase can decode route IDs from tx receipts
 
 **Phase 6 — iOS App** (`ios/EasyWalks/`)
 - 18 Swift files + `EasyWalks.xcodeproj` created
@@ -181,6 +192,13 @@ GET  /api/v1/media/:rootHash         → proxy download from 0G Storage (cached)
 - Auth: ConnectWalletView (address input + MetaMask sign)
 
 **Seed data** — 9 Tokyo locations across 3 mock creators (`backend/src/seed.ts`)
+
+**Phase 7 — End-to-end validation updates**
+- Switched storage SDK from `@0glabs/0g-ts-sdk` to `@0gfoundation/0g-ts-sdk` in backend
+- Verified route generation + storage upload success after SDK change
+- Added Cannes scenario E2E script (`backend/src/tests/cannesE2E.test.ts`) and npm script `test:cannes-e2e`
+- Validated full flow with two creators (`NPC_1_KEY`, `NPC_2_KEY`) + buyer:
+  upload content → generate Cannes route → prepare purchase → on-chain purchase → confirm purchase → creator balances increase
 
 ---
 
@@ -218,6 +236,25 @@ curl -X POST localhost:3000/api/v1/routes/generate \
 - Set your development team in signing settings
 - Update `APIClient.swift` `baseURL` if testing on device (use ngrok: `ngrok http 3000`)
 - Build and run on simulator or device (iOS 17+)
+
+**4.5. Reproduce Cannes 2-creator E2E (backend-only smoke)**
+```bash
+cd backend
+# Ensure backend/.env includes: NPC_1_KEY, NPC_2_KEY, OG_PRIVATE_KEY (and CONTRACT_ADDRESS)
+DOTENV_CONFIG_PATH=.env PORT=3000 node -r dotenv/config -r ts-node/register src/index.ts
+```
+
+In a second terminal:
+```bash
+cd backend
+DOTENV_CONFIG_PATH=.env API_BASE_URL=http://127.0.0.1:3000 \
+  node -r dotenv/config -r ts-node/register src/tests/cannesE2E.test.ts
+```
+
+Expected output includes:
+- `Cannes E2E passed`
+- `Contributions: { ...creator1..., ...creator2... }`
+- non-zero creator balance deltas
 
 **5. Test the purchase flow**
 - Generate a route, tap "Purchase Route"

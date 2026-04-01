@@ -232,5 +232,57 @@ router.post("/:id/confirm-purchase", auth_1.requireAuth, async (req, res) => {
         res.status(500).json({ error: "Purchase confirmation failed", detail: String(err) });
     }
 });
+// POST /routes/:id/store-verification
+router.post("/:id/store-verification", auth_1.requireAuth, async (req, res) => {
+    const { txHash, creditsNote, sourceMaterials } = req.body;
+    if (!txHash) {
+        res.status(400).json({ error: "Missing txHash" });
+        return;
+    }
+    const db = (0, schema_1.getDb)();
+    const routeRow = db
+        .prepare(`SELECT * FROM routes WHERE id = ?`)
+        .get(req.params.id);
+    if (!routeRow) {
+        res.status(404).json({ error: "Route not found" });
+        return;
+    }
+    const route = rowToRoute(routeRow);
+    const purchaseRow = db
+        .prepare(`SELECT tx_hash, purchased_at FROM purchases WHERE route_id = ? AND buyer_id = ?`)
+        .get(route.id, req.walletAddress);
+    if (!purchaseRow || purchaseRow.tx_hash.toLowerCase() !== txHash.toLowerCase()) {
+        res.status(400).json({ error: "No matching verified purchase found for this txHash and buyer" });
+        return;
+    }
+    const itemRows = db
+        .prepare(`SELECT id, title, creator_id, text_hash FROM content_items WHERE id IN (${route.item_ids.map(() => "?").join(",")})`)
+        .all(...route.item_ids);
+    const proofPayload = {
+        type: "easywalks.verification.v1",
+        routeId: route.id,
+        routeHash: route.route_hash,
+        contractRouteId: route.contract_route_id,
+        buyer: req.walletAddress,
+        payment: {
+            txHash: purchaseRow.tx_hash,
+            priceWei: route.price_og,
+            purchasedAt: purchaseRow.purchased_at,
+        },
+        contributors: route.contributions,
+        contentReferences: itemRows,
+        sourceMaterials: sourceMaterials || [],
+        creditsNote: creditsNote || "Credits attached by buyer in web frontend.",
+        generatedAt: Date.now(),
+    };
+    try {
+        const verificationHash = await (0, storage_1.uploadData)(Buffer.from(JSON.stringify(proofPayload), "utf8"));
+        res.json({ verificationHash, proofPayload });
+    }
+    catch (err) {
+        console.error("Store verification error:", err);
+        res.status(500).json({ error: "Failed to store verification proof", detail: String(err) });
+    }
+});
 exports.default = router;
 //# sourceMappingURL=routeHandlers.js.map

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EasyWalks Web MVP</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>EasyWalks Web MVP</h1>
+      <p>User + Creators + On-chain purchase + 0G verification proof</p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>1) Wallet Auth</h2>
+        <div class="row">
+          <input id="walletAddress" placeholder="0x..." />
+          <button id="connectBtn">Connect Wallet</button>
+          <button id="loginBtn">Sign In (Challenge + Verify)</button>
+        </div>
+        <p id="authStatus">Not authenticated</p>
+      </section>
+
+      <section class="card">
+        <h2>2) Simulated Creator Inputs</h2>
+        <p>
+          Content creation is simulated for the demo. Two NPC creators have already submitted Cannes content.
+        </p>
+        <pre id="npcInfo">NPC_1 and NPC_2 submissions are used as the source pool.</pre>
+      </section>
+
+      <section class="card">
+        <h2>3) User Prompt to Curate Tour</h2>
+        <textarea id="tourPrompt">make me a half day walking tour in cannes focused on local eateries</textarea>
+        <button id="generateRouteBtn">Generate Tour From Prompt</button>
+        <pre id="routeResult"></pre>
+      </section>
+
+      <section class="card">
+        <h2>4) Purchase + Revenue Split + 0G Proof</h2>
+        <div class="row">
+          <input id="routeId" placeholder="Route ID (auto-filled after generate)" />
+          <button id="prepareBuyBtn">Prepare Buy</button>
+        </div>
+        <pre id="prepareResult"></pre>
+        <pre id="splitResult"></pre>
+
+        <div class="row">
+          <input id="txHash" placeholder="Paste transaction hash after wallet payment" />
+          <button id="confirmBuyBtn">Confirm Purchase</button>
+        </div>
+        <pre id="confirmResult"></pre>
+
+        <h3>Store Verification on 0G</h3>
+        <textarea id="sourceMaterials" placeholder='Source materials JSON: [{"title":"Historic Cannes Archive","author":"City Museum","sourceUrl":"https://..."}]'></textarea>
+        <textarea id="creditsNote" placeholder="Credits note (how original materials were used and attributed)"></textarea>
+        <button id="storeProofBtn">Store Proof on 0G</button>
+        <pre id="proofResult"></pre>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+  </html>

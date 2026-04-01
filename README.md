@@ -35,7 +35,20 @@ npx ts-node src/index.ts
 # Backend runs on http://localhost:3000
 ```
 
-### 3. Open the iOS App
+### 3. Run the Web Frontend (Simple MVP)
+
+```bash
+cd web
+python3 -m http.server 5173
+# Open http://localhost:5173
+```
+
+Notes:
+- Backend should be running on `http://localhost:3000`
+- Web app uses injected wallet provider (`window.ethereum`) for sign-in
+- Purchase flow currently expects you to paste the `txHash` after confirming payment in wallet
+
+### 4. (Optional) Open the iOS App
 
 Open `ios/EasyWalks/EasyWalks.xcodeproj` in Xcode, set your team, and run on a device or simulator.
 
@@ -73,6 +86,7 @@ This project does **not** use axios. Recent npm releases axios@1.14.1 and axios@
 0g-easy-walks/
 ├── contracts/   Hardhat + EasyWalksMarketplace.sol
 ├── backend/     Node.js/Express/TypeScript API
-├── ios/         SwiftUI iOS app
+├── ios/         SwiftUI iOS app (optional/legacy for this MVP)
+├── web/         Simple browser frontend MVP
 └── PLAN.md      Architecture plan
 ```
