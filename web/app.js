@@ -92,6 +92,19 @@ async function api(path, options = {}) {
   return body;
 }
 
+async function waitForTxReceipt(txHash, timeoutMs = 120000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const receipt = await window.ethereum.request({
+      method: "eth_getTransactionReceipt",
+      params: [txHash],
+    });
+    if (receipt) return receipt;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  throw new Error("Timed out waiting for on-chain confirmation");
+}
+
 function parsePrompt(prompt) {
   const text = prompt.toLowerCase();
 
@@ -156,6 +169,53 @@ function buildSplit(route, priceWei) {
   };
 }
 
+function getSortedContributions(route) {
+  return Object.entries((route && route.contributions) || {}).sort((a, b) => b[1] - a[1]);
+}
+
+function renderCreditsBreakdown(route, priceWei) {
+  const entries = getSortedContributions(route);
+  const pie = el("creditsPie");
+  const list = el("creditsList");
+  list.innerHTML = "";
+  if (!entries.length) {
+    pie.style.background = "conic-gradient(#2563eb 0 100%)";
+    return;
+  }
+
+  const colors = ["#2563eb", "#14b8a6", "#f59e0b", "#a855f7", "#ef4444"];
+  let start = 0;
+  const segments = entries.map(([, pct], i) => {
+    const end = start + pct;
+    const seg = `${colors[i % colors.length]} ${start}% ${end}%`;
+    start = end;
+    return seg;
+  });
+  pie.style.background = `conic-gradient(${segments.join(", ")})`;
+
+  const totalWei = BigInt(priceWei || "0");
+  entries.forEach(([wallet, pct], i) => {
+    const shareWei = (totalWei * BigInt(Math.round(pct * 100))) / 10000n;
+    const li = document.createElement("li");
+    li.textContent = `NPC_${i + 1} (${wallet.slice(0, 8)}...): ${pct}% (${formatWeiToOg(shareWei.toString())} OG)`;
+    li.style.color = colors[i % colors.length];
+    list.appendChild(li);
+  });
+}
+
+function prefillProofFields(route, txHash) {
+  const sourceMaterials = ((route && route.stops) || []).map((s) => ({
+    title: s.contentItem.title,
+    creator: s.contentItem.creator_id,
+    category: s.contentItem.category,
+    textHash: s.contentItem.text_hash,
+  }));
+  el("txHash").value = txHash || "";
+  el("sourceMaterials").value = JSON.stringify(sourceMaterials, null, 2);
+  el("creditsNote").value =
+    "All creator submissions used in this curated route are credited above. Revenue shares are proportional to contribution percentages.";
+}
+
 async function logNpcSubmissions(city, route) {
   try {
     const res = await api(`/content?city=${encodeURIComponent(city)}&limit=100`);
@@ -173,10 +233,12 @@ async function logNpcSubmissions(city, route) {
       .sort((a, b) => b[1].length - a[1].length)
       .slice(0, 2);
 
-    const selectedIds = new Set((route.stops || []).map((s) => s.contentItem.id));
+    const selectedIds = new Set(((route && route.stops) || []).map((s) => s.contentItem.id));
+    const routeContributions = (route && route.contributions) || {};
     const output = creators.map(([wallet, creatorItems], idx) => ({
       npc: `NPC_${idx + 1}`,
       wallet,
+      contributionPercentInCurrentRoute: routeContributions[wallet] || 0,
       submissions: creatorItems.map((item) => ({
         id: item.id,
         title: item.title,
@@ -190,6 +252,11 @@ async function logNpcSubmissions(city, route) {
     logTerminal("NPC Submissions", { error: "Failed to fetch NPC submissions", detail: err.message || String(err) });
   }
 }
+
+el("previewNpcBtn").onclick = async () => {
+  logTerminal("NPC Preview", "Fetching NPC submissions for Cannes...");
+  await logNpcSubmissions("Cannes", latestRoute || null);
+};
 
 function ensureMap() {
   if (map) return map;
@@ -391,6 +458,12 @@ el("buyNowBtn").onclick = async () => {
     });
 
     el("txHash").value = txHash;
+    logTerminal("Purchase", { status: "Transaction submitted. Waiting for on-chain confirmation...", txHash });
+    const receipt = await waitForTxReceipt(txHash);
+    if (receipt.status !== "0x1") {
+      throw new Error("Transaction reverted on-chain");
+    }
+    logTerminal("Purchase", { status: "Transaction confirmed on-chain", blockNumber: receipt.blockNumber, txHash });
 
     const confirmBody = await api(`/routes/${routeId}/confirm-purchase`, {
       method: "POST",
@@ -403,6 +476,8 @@ el("buyNowBtn").onclick = async () => {
       purchase: confirmBody,
       note: "Purchase completed via connected wallet in one click.",
     });
+    renderCreditsBreakdown(latestRoute, prep.priceWei);
+    prefillProofFields(latestRoute, txHash);
     el("nextStepsWrap").classList.remove("hidden");
   } catch (err) {
     logTerminal("Purchase Error", err.message);

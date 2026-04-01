@@ -204,6 +204,31 @@ pre {
   font-size: 14px;
 }
 
+.credits-grid {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.credits-pie {
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  border: 2px solid #334155;
+  background: conic-gradient(#2563eb 0 100%);
+}
+
+.credits-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.credits-list li {
+  margin-bottom: 6px;
+}
+
 @media (max-width: 1100px) {
   .app-layout {
     grid-template-columns: 1fr;

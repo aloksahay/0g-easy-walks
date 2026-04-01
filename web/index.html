@@ -72,10 +72,17 @@
         </div>
 
         <div id="nextStepsWrap" class="hidden">
-          <h3>Next Steps (Post-Payment)</h3>
-          <p>Payment confirmed. Store proof and attribution metadata on 0G for verification.</p>
+          <h3>5) Post-Payment Credits & Verification</h3>
+          <p>Payment data is auto-populated from Step 4. Contributors are credited below with share breakdown.</p>
+          <div class="credits-grid">
+            <div id="creditsPie" class="credits-pie"></div>
+            <div>
+              <div class="map-header">Creator Credits</div>
+              <ul id="creditsList" class="credits-list"></ul>
+            </div>
+          </div>
           <div class="row">
-            <input id="txHash" placeholder="Transaction hash (auto-filled after buy)" />
+            <input id="txHash" placeholder="Transaction hash auto-filled from Step 4" readonly />
           </div>
           <textarea id="sourceMaterials" placeholder='Source materials JSON: [{"title":"Historic Cannes Archive","author":"City Museum","sourceUrl":"https://..."}]'></textarea>
           <textarea id="creditsNote" placeholder="Credits note (how original materials were used and attributed)"></textarea>
