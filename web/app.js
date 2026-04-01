@@ -17,6 +17,10 @@ let currentWallet = "";
 let latestRouteId = "";
 let latestPrepare = null;
 let latestRoute = null;
+let generateProgressTimer = null;
+let map = null;
+let mapMarkers = [];
+let mapRouteLine = null;
 
 function el(id) {
   return document.getElementById(id);
@@ -24,6 +28,51 @@ function el(id) {
 
 function setJson(id, value) {
   el(id).textContent = JSON.stringify(value, null, 2);
+}
+
+function stopGenerateProgress() {
+  if (generateProgressTimer) {
+    clearInterval(generateProgressTimer);
+    generateProgressTimer = null;
+  }
+}
+
+function setGenerateProgress(value, labelText) {
+  const safe = Math.max(0, Math.min(100, value));
+  el("generateProgressFill").style.width = `${safe}%`;
+  if (labelText) el("generateProgressLabel").textContent = labelText;
+}
+
+function startGenerateProgress() {
+  stopGenerateProgress();
+  el("generateProgressWrap").classList.remove("hidden");
+  setGenerateProgress(10, "Reading your prompt...");
+  const start = Date.now();
+
+  generateProgressTimer = setInterval(() => {
+    const elapsed = Date.now() - start;
+    let pct = 10;
+    let label = "Reading your prompt...";
+
+    if (elapsed > 700) {
+      pct = 30;
+      label = "Finding Cannes submissions from NPC creators...";
+    }
+    if (elapsed > 1800) {
+      pct = 55;
+      label = "Curating stops for your preferences...";
+    }
+    if (elapsed > 3200) {
+      pct = 75;
+      label = "Calculating fair-share contribution split...";
+    }
+    if (elapsed > 4800) {
+      pct = 90;
+      label = "Finalizing curated tour...";
+    }
+
+    setGenerateProgress(pct, label);
+  }, 250);
 }
 
 async function api(path, options = {}) {
@@ -103,6 +152,63 @@ function buildSplit(route, priceWei) {
   };
 }
 
+function ensureMap() {
+  if (map) return map;
+  map = L.map("tourMap", { zoomControl: true }).setView([43.55, 7.01], 13);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(map);
+  return map;
+}
+
+function renderTourVisual(route) {
+  const stops = route.stops || [];
+  const list = el("tourStopsList");
+  el("tourVisualTitle").textContent = `${route.title} (${stops.length} stops)`;
+  list.innerHTML = "";
+  el("tourVisualWrap").classList.remove("hidden");
+  const currentMap = ensureMap();
+
+  if (!stops.length) {
+    currentMap.setView([43.55, 7.01], 13);
+    return;
+  }
+
+  mapMarkers.forEach((m) => currentMap.removeLayer(m));
+  mapMarkers = [];
+  if (mapRouteLine) {
+    currentMap.removeLayer(mapRouteLine);
+    mapRouteLine = null;
+  }
+
+  const latLngs = stops.map((s) => [Number(s.contentItem.latitude), Number(s.contentItem.longitude)]);
+  mapRouteLine = L.polyline(latLngs, { color: "#38bdf8", weight: 4 }).addTo(currentMap);
+
+  stops.forEach((s, idx) => {
+    const lat = Number(s.contentItem.latitude);
+    const lng = Number(s.contentItem.longitude);
+    const marker = L.marker([lat, lng], {
+      icon: L.divIcon({
+        className: "stop-marker",
+        html: `${idx + 1}`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      }),
+    }).addTo(currentMap);
+    marker.bindPopup(`<strong>${s.contentItem.title}</strong><br/>${s.contentItem.category}`);
+    mapMarkers.push(marker);
+
+    const li = document.createElement("li");
+    li.textContent = `${idx + 1}. ${s.contentItem.title} (${s.contentItem.category})`;
+    list.appendChild(li);
+  });
+
+  const bounds = L.latLngBounds(latLngs);
+  currentMap.fitBounds(bounds.pad(0.2));
+  setTimeout(() => currentMap.invalidateSize(), 50);
+}
+
 el("connectBtn").onclick = async () => {
   if (!window.ethereum) {
     alert("No wallet detected. Install MetaMask.");
@@ -151,6 +257,7 @@ el("loginBtn").onclick = async () => {
 
 el("generateRouteBtn").onclick = async () => {
   try {
+    startGenerateProgress();
     const prompt = el("tourPrompt").value.trim();
     if (!prompt) throw new Error("Prompt is required");
     const parsed = parsePrompt(prompt);
@@ -168,46 +275,76 @@ el("generateRouteBtn").onclick = async () => {
 
     latestRouteId = body.route.id;
     latestRoute = body.route;
-    el("routeId").value = latestRouteId;
+    latestPrepare = null;
+    setJson("prepareResult", {});
+    setJson("confirmResult", {});
+    setJson("proofResult", {});
+    el("nextStepsWrap").classList.add("hidden");
+    renderTourVisual(body.route);
+    stopGenerateProgress();
+    setGenerateProgress(100, "Tour generated successfully.");
     setJson("routeResult", {
       prompt,
       parsedPreferences: parsed,
       route: body.route,
       note: "Curated from pre-submitted NPC creator content.",
     });
+    setTimeout(() => {
+      el("generateProgressWrap").classList.add("hidden");
+    }, 700);
   } catch (err) {
+    stopGenerateProgress();
+    setGenerateProgress(100, "Generation failed.");
     setJson("routeResult", { error: err.message });
   }
 };
 
-el("prepareBuyBtn").onclick = async () => {
+el("buyNowBtn").onclick = async () => {
   try {
-    const routeId = el("routeId").value.trim() || latestRouteId;
+    if (!window.ethereum) throw new Error("Wallet provider not found");
+    const routeId = latestRouteId;
     if (!routeId) throw new Error("Route ID required");
-    const body = await api(`/routes/${routeId}/prepare-purchase`, { method: "POST" });
-    latestPrepare = body;
-    setJson("prepareResult", body);
-    if (latestRoute?.contributions) {
-      setJson("splitResult", buildSplit(latestRoute, body.priceWei));
+
+    const accounts = await window.ethereum.request({ method: "eth_accounts" });
+    const from = (accounts && accounts[0]) || currentWallet;
+    if (!from) throw new Error("No connected wallet account found");
+
+    let prep = latestPrepare;
+    if (!prep || !prep.contractAddress || !prep.calldata) {
+      prep = await api(`/routes/${routeId}/prepare-purchase`, { method: "POST" });
+      latestPrepare = prep;
+      setJson("prepareResult", prep);
+      if (latestRoute?.contributions) {
+        setJson("splitResult", buildSplit(latestRoute, prep.priceWei));
+      }
     }
-  } catch (err) {
-    setJson("prepareResult", { error: err.message });
-    setJson("splitResult", { error: err.message });
-  }
-};
 
-el("confirmBuyBtn").onclick = async () => {
-  try {
-    const routeId = el("routeId").value.trim() || latestRouteId;
-    const txHash = el("txHash").value.trim();
-    if (!routeId || !txHash) throw new Error("Route ID and txHash required");
+    const txHash = await window.ethereum.request({
+      method: "eth_sendTransaction",
+      params: [
+        {
+          from,
+          to: prep.contractAddress,
+          value: `0x${BigInt(prep.priceWei).toString(16)}`,
+          data: prep.calldata,
+        },
+      ],
+    });
 
-    const body = await api(`/routes/${routeId}/confirm-purchase`, {
+    el("txHash").value = txHash;
+
+    const confirmBody = await api(`/routes/${routeId}/confirm-purchase`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ txHash }),
     });
-    setJson("confirmResult", body);
+
+    setJson("confirmResult", {
+      txHash,
+      purchase: confirmBody,
+      note: "Purchase completed via connected wallet in one click.",
+    });
+    el("nextStepsWrap").classList.remove("hidden");
   } catch (err) {
     setJson("confirmResult", { error: err.message });
   }
@@ -215,7 +352,7 @@ el("confirmBuyBtn").onclick = async () => {
 
 el("storeProofBtn").onclick = async () => {
   try {
-    const routeId = el("routeId").value.trim() || latestRouteId;
+    const routeId = latestRouteId;
     const txHash = el("txHash").value.trim();
     if (!routeId || !txHash) throw new Error("Route ID and txHash required");
 

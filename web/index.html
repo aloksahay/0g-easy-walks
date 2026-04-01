@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EasyWalks Web MVP</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -35,32 +41,57 @@
         <h2>3) User Prompt to Curate Tour</h2>
         <textarea id="tourPrompt">make me a half day walking tour in cannes focused on local eateries</textarea>
         <button id="generateRouteBtn">Generate Tour From Prompt</button>
+        <div id="generateProgressWrap" class="progress-wrap hidden" aria-live="polite">
+          <div class="progress-label" id="generateProgressLabel">Starting curation...</div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="generateProgressFill"></div>
+          </div>
+        </div>
         <pre id="routeResult"></pre>
       </section>
 
       <section class="card">
-        <h2>4) Purchase + Revenue Split + 0G Proof</h2>
-        <div class="row">
-          <input id="routeId" placeholder="Route ID (auto-filled after generate)" />
-          <button id="prepareBuyBtn">Prepare Buy</button>
+        <h2>4) Tour Preview & Purchase</h2>
+        <div id="tourVisualWrap" class="hidden">
+          <h3 id="tourVisualTitle">Your Curated Cannes Tour</h3>
+          <div class="tour-visual-grid">
+            <div class="tour-map-panel">
+              <div class="map-header">Points of Interest</div>
+              <div id="tourMap" role="img" aria-label="Tour map with points"></div>
+            </div>
+            <div class="tour-poi-panel">
+              <div class="map-header">Tour Stops</div>
+              <ol id="tourStopsList"></ol>
+            </div>
+          </div>
+          <div class="row">
+            <button id="buyNowBtn">Buy Curated Tour Now</button>
+          </div>
         </div>
+
         <pre id="prepareResult"></pre>
         <pre id="splitResult"></pre>
-
-        <div class="row">
-          <input id="txHash" placeholder="Paste transaction hash after wallet payment" />
-          <button id="confirmBuyBtn">Confirm Purchase</button>
-        </div>
         <pre id="confirmResult"></pre>
 
-        <h3>Store Verification on 0G</h3>
-        <textarea id="sourceMaterials" placeholder='Source materials JSON: [{"title":"Historic Cannes Archive","author":"City Museum","sourceUrl":"https://..."}]'></textarea>
-        <textarea id="creditsNote" placeholder="Credits note (how original materials were used and attributed)"></textarea>
-        <button id="storeProofBtn">Store Proof on 0G</button>
-        <pre id="proofResult"></pre>
+        <div id="nextStepsWrap" class="hidden">
+          <h3>Next Steps (Post-Payment)</h3>
+          <p>Payment confirmed. Store proof and attribution metadata on 0G for verification.</p>
+          <div class="row">
+            <input id="txHash" placeholder="Transaction hash (auto-filled after buy)" />
+          </div>
+          <textarea id="sourceMaterials" placeholder='Source materials JSON: [{"title":"Historic Cannes Archive","author":"City Museum","sourceUrl":"https://..."}]'></textarea>
+          <textarea id="creditsNote" placeholder="Credits note (how original materials were used and attributed)"></textarea>
+          <button id="storeProofBtn">Store Proof on 0G</button>
+          <pre id="proofResult"></pre>
+        </div>
       </section>
     </main>
 
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
     <script src="./app.js"></script>
   </body>
   </html>
