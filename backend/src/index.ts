@@ -1,4 +1,5 @@
 import express from "express";
+import path from "path";
 import { config } from "./config";
 import { getDb } from "./db/schema";
 import authRouter from "./routes/auth";
@@ -25,12 +26,20 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: Date.now() });
 });
 
+// Serve web MVP from backend (single-origin deploy for ngrok demos)
+const webDir = path.resolve(__dirname, "../../web");
+app.use(express.static(webDir));
+
 // API routes
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/content", contentRouter);
 app.use("/api/v1/routes", routesRouter);
 app.use("/api/v1/creators", creatorsRouter);
 app.use("/api/v1/media", mediaRouter);
+
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(webDir, "index.html"));
+});
 
 // Initialize DB on startup
 getDb();

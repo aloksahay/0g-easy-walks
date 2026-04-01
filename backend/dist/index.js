@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const path_1 = __importDefault(require("path"));
 const config_1 = require("./config");
 const schema_1 = require("./db/schema");
 const auth_1 = __importDefault(require("./routes/auth"));
@@ -25,12 +26,18 @@ app.use((_req, res, next) => {
 app.get("/health", (_req, res) => {
     res.json({ status: "ok", timestamp: Date.now() });
 });
+// Serve web MVP from backend (single-origin deploy for ngrok demos)
+const webDir = path_1.default.resolve(__dirname, "../../web");
+app.use(express_1.default.static(webDir));
 // API routes
 app.use("/api/v1/auth", auth_1.default);
 app.use("/api/v1/content", content_1.default);
 app.use("/api/v1/routes", routeHandlers_1.default);
 app.use("/api/v1/creators", creators_1.default);
 app.use("/api/v1/media", media_1.default);
+app.get("/", (_req, res) => {
+    res.sendFile(path_1.default.join(webDir, "index.html"));
+});
 // Initialize DB on startup
 (0, schema_1.getDb)();
 app.listen(config_1.config.port, () => {

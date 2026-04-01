@@ -1,4 +1,16 @@
-const API_BASE = "http://localhost:3000/api/v1";
+const apiBaseParam = new URLSearchParams(window.location.search).get("apiBase");
+if (apiBaseParam) {
+  localStorage.setItem("easywalksApiBase", apiBaseParam);
+}
+
+const storedApiBase = localStorage.getItem("easywalksApiBase");
+const API_BASE =
+  apiBaseParam ||
+  storedApiBase ||
+  ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") &&
+  window.location.port === "5173"
+    ? "http://localhost:3000/api/v1"
+    : `${window.location.origin}/api/v1`);
 
 let authToken = "";
 let currentWallet = "";

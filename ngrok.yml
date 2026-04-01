@@ -1,0 +1,8 @@
+version: "2"
+tunnels:
+  easywalks-web:
+    proto: http
+    addr: 5173
+  easywalks-api:
+    proto: http
+    addr: 3000
