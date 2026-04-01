@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EasyWalks Web MVP</title>
+    <title>EasyWalks Demo</title>
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -14,8 +14,8 @@
   </head>
   <body>
     <header>
-      <h1>EasyWalks Web MVP</h1>
-      <p>User + Creators + On-chain purchase + 0G verification proof</p>
+      <h1>EasyWalks Demo</h1>
+      <p>Open source travel content curator.</p>
     </header>
 
     <main class="app-layout">
@@ -43,7 +43,7 @@
       <section class="card">
         <h2>3) User Prompt to Curate Tour</h2>
         <textarea id="tourPrompt">make me a half day walking tour in cannes focused on local eateries</textarea>
-        <button id="generateRouteBtn">Generate Tour From Prompt</button>
+        <button id="generateRouteBtn">Generate Tour</button>
         <div id="generateProgressWrap" class="progress-wrap hidden" aria-live="polite">
           <div class="progress-label" id="generateProgressLabel">Starting curation...</div>
           <div class="progress-bar">
@@ -69,6 +69,12 @@
           <div class="row">
             <button id="buyNowBtn">Buy Curated Tour Now</button>
           </div>
+          <div id="buyProgressWrap" class="progress-wrap hidden" aria-live="polite">
+            <div class="progress-label" id="buyProgressLabel">Starting purchase...</div>
+            <div class="progress-bar">
+              <div class="progress-fill" id="buyProgressFill"></div>
+            </div>
+          </div>
         </div>
 
         <div id="nextStepsWrap" class="hidden">
@@ -84,9 +90,9 @@
           <div class="row">
             <input id="txHash" placeholder="Transaction hash auto-filled from Step 4" readonly />
           </div>
-          <textarea id="sourceMaterials" placeholder='Source materials JSON: [{"title":"Historic Cannes Archive","author":"City Museum","sourceUrl":"https://..."}]'></textarea>
-          <textarea id="creditsNote" placeholder="Credits note (how original materials were used and attributed)"></textarea>
-          <button id="storeProofBtn">Store Proof on 0G</button>
+          <textarea id="sourceMaterials" placeholder='Source materials JSON: [{"title":"Historic Cannes Archive","author":"City Museum","sourceUrl":"https://..."}]' readonly></textarea>
+          <textarea id="creditsNote" placeholder="Credits note (how original materials were used and attributed)" readonly></textarea>
+          <button id="viewProofBtn">View Proof</button>
         </div>
       </section>
       </div>

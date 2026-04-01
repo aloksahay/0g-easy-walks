@@ -18,9 +18,11 @@ let latestRouteId = "";
 let latestPrepare = null;
 let latestRoute = null;
 let generateProgressTimer = null;
+let buyProgressTimer = null;
 let map = null;
 let mapMarkers = [];
 let mapRouteLine = null;
+let latestProofHash = "";
 
 function el(id) {
   return document.getElementById(id);
@@ -81,15 +83,98 @@ function startGenerateProgress() {
   }, 250);
 }
 
-async function api(path, options = {}) {
-  const headers = options.headers || {};
-  if (authToken) headers.Authorization = `Bearer ${authToken}`;
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(body.error || body.detail || "Request failed");
+function stopBuyProgress() {
+  if (buyProgressTimer) {
+    clearInterval(buyProgressTimer);
+    buyProgressTimer = null;
   }
+}
+
+function setBuyProgress(value, labelText) {
+  const safe = Math.max(0, Math.min(100, value));
+  el("buyProgressFill").style.width = `${safe}%`;
+  if (labelText) el("buyProgressLabel").textContent = labelText;
+}
+
+function startBuyProgress() {
+  stopBuyProgress();
+  el("buyProgressWrap").classList.remove("hidden");
+  setBuyProgress(8, "Preparing purchase...");
+  const start = Date.now();
+
+  buyProgressTimer = setInterval(() => {
+    const elapsed = Date.now() - start;
+    let pct = 8;
+    let label = "Preparing purchase...";
+    if (elapsed > 900) {
+      pct = 30;
+      label = "Opening wallet confirmation...";
+    }
+    if (elapsed > 3500) {
+      pct = 60;
+      label = "Waiting for on-chain confirmation...";
+    }
+    if (elapsed > 9000) {
+      pct = 82;
+      label = "Finalizing purchase records...";
+    }
+    setBuyProgress(pct, label);
+  }, 250);
+}
+
+async function api(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  // ngrok free tier: only when on ngrok host (avoid extra header on localhost:5173→:3000 — triggers CORS preflight)
+  if (typeof window !== "undefined" && window.location.hostname.includes("ngrok")) {
+    headers["ngrok-skip-browser-warning"] = "69420";
+  }
+
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  } catch (netErr) {
+    throw new Error(
+      netErr && netErr.message
+        ? `Network error: ${netErr.message}`
+        : "Network error — is the backend running on the same origin as this page?"
+    );
+  }
+
+  const text = await res.text();
+  let body = {};
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { _nonJson: text.slice(0, 400) };
+    }
+  }
+
+  if (!res.ok) {
+    const msg =
+      [body.error, body.detail, body.message].filter(Boolean).join(" — ") ||
+      (typeof body._nonJson === "string" ? body._nonJson : "") ||
+      `HTTP ${res.status} ${res.statusText || ""}`.trim();
+    throw new Error(msg || "Request failed");
+  }
+
   return body;
+}
+
+/** Poll until backend has registered the route on-chain (prepare-purchase needs contract_route_id). */
+async function waitForContractRegistration(routeId, timeoutMs = 180000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const data = await api(`/routes/${routeId}`);
+    if (data.contract_route_id != null && data.contract_route_id !== undefined) {
+      return data.contract_route_id;
+    }
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  throw new Error(
+    "Timed out waiting for on-chain route registration. The chain may be slow — retry in a minute or check backend logs."
+  );
 }
 
 async function waitForTxReceipt(txHash, timeoutMs = 120000) {
@@ -214,6 +299,24 @@ function prefillProofFields(route, txHash) {
   el("sourceMaterials").value = JSON.stringify(sourceMaterials, null, 2);
   el("creditsNote").value =
     "All creator submissions used in this curated route are credited above. Revenue shares are proportional to contribution percentages.";
+}
+
+async function autoStoreProof(routeId, txHash) {
+  let sourceMaterials = [];
+  const sourceText = el("sourceMaterials").value.trim();
+  if (sourceText) sourceMaterials = JSON.parse(sourceText);
+
+  const body = await api(`/routes/${routeId}/store-verification`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      txHash,
+      creditsNote: el("creditsNote").value.trim(),
+      sourceMaterials,
+    }),
+  });
+  latestProofHash = body.verificationHash || "";
+  return body;
 }
 
 async function logNpcSubmissions(city, route) {
@@ -393,12 +496,15 @@ el("generateRouteBtn").onclick = async () => {
     stopGenerateProgress();
     setGenerateProgress(100, "Tour generated successfully.");
     logNpcSubmissions(parsed.city, body.route);
-    logTerminal("Purchase Prep", { status: "Preparing purchase in background for faster wallet popup..." });
+    logTerminal("Purchase Prep", {
+      status: "Waiting for marketplace to register this route on-chain (usually 15–60s)...",
+    });
     try {
+      await waitForContractRegistration(latestRouteId);
       const prep = await api(`/routes/${latestRouteId}/prepare-purchase`, { method: "POST" });
       latestPrepare = prep;
       logTerminal("Purchase Prep", {
-        status: "Purchase prepared. Buy button should open wallet quickly.",
+        status: "Purchase ready — wallet step should be quick now.",
         ...prep,
       });
       if (latestRoute?.contributions) {
@@ -422,6 +528,7 @@ el("generateRouteBtn").onclick = async () => {
 
 el("buyNowBtn").onclick = async () => {
   try {
+    startBuyProgress();
     if (!window.ethereum) throw new Error("Wallet provider not found");
     const routeId = latestRouteId;
     if (!routeId) throw new Error("Route ID required");
@@ -432,7 +539,10 @@ el("buyNowBtn").onclick = async () => {
 
     let prep = latestPrepare;
     if (!prep || !prep.contractAddress || !prep.calldata) {
-      logTerminal("Purchase Prep", { status: "Preparing purchase now. This can take a bit..." });
+      logTerminal("Purchase Prep", {
+        status: "Waiting for on-chain route registration, then building purchase calldata...",
+      });
+      await waitForContractRegistration(routeId);
       prep = await api(`/routes/${routeId}/prepare-purchase`, { method: "POST" });
       latestPrepare = prep;
       logTerminal("Purchase Prep", prep);
@@ -445,6 +555,7 @@ el("buyNowBtn").onclick = async () => {
       status: "Opening wallet confirmation...",
       note: "If popup is delayed, keep this tab active for a few seconds.",
     });
+    setBuyProgress(35, "Approve transaction in wallet...");
     const txHash = await window.ethereum.request({
       method: "eth_sendTransaction",
       params: [
@@ -459,11 +570,13 @@ el("buyNowBtn").onclick = async () => {
 
     el("txHash").value = txHash;
     logTerminal("Purchase", { status: "Transaction submitted. Waiting for on-chain confirmation...", txHash });
+    setBuyProgress(62, "Transaction sent. Waiting for confirmation...");
     const receipt = await waitForTxReceipt(txHash);
     if (receipt.status !== "0x1") {
       throw new Error("Transaction reverted on-chain");
     }
     logTerminal("Purchase", { status: "Transaction confirmed on-chain", blockNumber: receipt.blockNumber, txHash });
+    setBuyProgress(86, "Confirmed on-chain. Syncing backend...");
 
     const confirmBody = await api(`/routes/${routeId}/confirm-purchase`, {
       method: "POST",
@@ -478,36 +591,44 @@ el("buyNowBtn").onclick = async () => {
     });
     renderCreditsBreakdown(latestRoute, prep.priceWei);
     prefillProofFields(latestRoute, txHash);
+    logTerminal("Proof Upload", "Auto-storing proof on 0G...");
+    const proofBody = await autoStoreProof(routeId, txHash);
+    logTerminal("Proof Upload", {
+      status: "Proof stored on 0G",
+      verificationHash: proofBody.verificationHash,
+    });
     el("nextStepsWrap").classList.remove("hidden");
+    stopBuyProgress();
+    setBuyProgress(100, "Purchase complete.");
+    setTimeout(() => {
+      el("buyProgressWrap").classList.add("hidden");
+    }, 900);
   } catch (err) {
+    stopBuyProgress();
+    setBuyProgress(100, "Purchase failed.");
     logTerminal("Purchase Error", err.message);
   }
 };
 
-el("storeProofBtn").onclick = async () => {
+el("viewProofBtn").onclick = async () => {
   try {
-    const routeId = latestRouteId;
-    const txHash = el("txHash").value.trim();
-    if (!routeId || !txHash) throw new Error("Route ID and txHash required");
-
-    let sourceMaterials = [];
-    const sourceText = el("sourceMaterials").value.trim();
-    if (sourceText) {
-      sourceMaterials = JSON.parse(sourceText);
+    if (!latestProofHash) {
+      throw new Error("Proof hash not available yet. Complete purchase first.");
     }
-
-    const body = await api(`/routes/${routeId}/store-verification`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        txHash,
-        creditsNote: el("creditsNote").value.trim(),
-        sourceMaterials,
-      }),
-    });
-
-    logTerminal("Proof Upload", body);
+    logTerminal("Proof View", { status: "Fetching proof from 0G storage", verificationHash: latestProofHash });
+    const res = await fetch(`${API_BASE.replace("/api/v1", "")}/api/v1/media/${latestProofHash}`);
+    if (!res.ok) {
+      throw new Error(`Failed to fetch proof blob: HTTP ${res.status}`);
+    }
+    const text = await res.text();
+    let payload = text;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      // leave as text
+    }
+    logTerminal("Proof View", { verificationHash: latestProofHash, proof: payload });
   } catch (err) {
-    logTerminal("Proof Upload Error", err.message);
+    logTerminal("Proof View Error", err.message);
   }
 };

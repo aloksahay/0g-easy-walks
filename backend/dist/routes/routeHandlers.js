@@ -25,6 +25,30 @@ function rowToRoute(row) {
         created_at: row.created_at,
     };
 }
+/**
+ * Register route on marketplace contract in the background so prepare-purchase
+ * can return quickly (no long tx.wait in the request path).
+ */
+function registerRouteOnChainInBackground(routeId) {
+    void (async () => {
+        try {
+            const db = (0, schema_1.getDb)();
+            const row = db.prepare(`SELECT * FROM routes WHERE id = ?`).get(routeId);
+            if (!row)
+                return;
+            const route = rowToRoute(row);
+            if (route.contract_route_id != null)
+                return;
+            const { creators, sharesBps } = (0, curator_1.contributionsToBps)(route.contributions);
+            const contractRouteId = await (0, contract_1.registerRoute)(creators, sharesBps, route.price_og, route.route_hash || "0x" + "0".repeat(64));
+            db.prepare(`UPDATE routes SET contract_route_id = ? WHERE id = ?`).run(contractRouteId, routeId);
+            console.log(`Route ${routeId} registered on-chain: ${contractRouteId}`);
+        }
+        catch (e) {
+            console.warn("Background registerRoute failed:", e);
+        }
+    })();
+}
 function rowToContentItem(row) {
     return {
         id: row.id,
@@ -84,18 +108,24 @@ router.post("/generate", auth_1.requireAuth, async (req, res) => {
             })),
             contributions: built.contributions,
         });
-        let routeHash = null;
-        try {
-            routeHash = await (0, storage_1.uploadData)(Buffer.from(routeJson, "utf8"));
-        }
-        catch (uploadErr) {
-            console.warn("Failed to upload route to 0G Storage:", uploadErr);
-        }
         const now = Date.now();
         const orderedItems = built.stops.map((s) => s.contentItem);
+        // Persist immediately so the API returns fast. 0G Storage upload can take minutes
+        // (waiting for on-chain finality); we upload in the background and patch route_hash.
         db.prepare(`INSERT INTO routes
        (id, title, description, city, duration_mins, distance_km, item_ids, contributions, price_og, route_hash, contract_route_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`).run(routeId, built.title, built.description, preferences.city, built.totalDuration, built.distance, JSON.stringify(orderedItems.map((i) => i.id)), JSON.stringify(built.contributions), config_1.config.routePrice.base, routeHash, now);
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`).run(routeId, built.title, built.description, preferences.city, built.totalDuration, built.distance, JSON.stringify(orderedItems.map((i) => i.id)), JSON.stringify(built.contributions), config_1.config.routePrice.base, now);
+        void (0, storage_1.uploadData)(Buffer.from(routeJson, "utf8"))
+            .then((hash) => {
+            (0, schema_1.getDb)()
+                .prepare(`UPDATE routes SET route_hash = ? WHERE id = ?`)
+                .run(hash, routeId);
+            console.log(`Route ${routeId} uploaded to 0G Storage: ${hash}`);
+        })
+            .catch((uploadErr) => {
+            console.warn("Background route upload to 0G Storage failed:", uploadErr);
+        });
+        registerRouteOnChainInBackground(routeId);
         res.json({
             route: {
                 id: routeId,
